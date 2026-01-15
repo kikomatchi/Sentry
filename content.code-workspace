@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"name": "content",
+			"path": "../../../../../content"
+		},
+		{
+			"name": "Sentry",
+			"path": "."
+		}
+	],
+	"settings": {
+		"git.ignoreLimitWarning": true
+	}
+}

@@ -180,3 +180,11 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 *.zip
+
+# Claude Code
+.claude/
+CLAUDE.md
+TASK.md
+
+# VS Code
+.vscode/

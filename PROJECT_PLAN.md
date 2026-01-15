@@ -52,16 +52,16 @@ This project is built for a Capstone Portfolio, demonstrating proficiency in **E
     - Image Size: 640.
 - [ ] **Evaluation:** Analyze Confusion Matrix and F1-Score to check for False Positives.
 
-### **Phase 2: Core Logic Development** (Week 2)
-- [ ] Develop `detect.py` script.
-- [ ] Implement video stream ingestion (Webcam/File).
-- [ ] Create logic for "Threat Persistence" (e.g., only alert if weapon seen for 5 consecutive frames to avoid glitches).
+### **Phase 2: Core Logic Development** (Week 2) ✅
+- [x] Develop `detect.py` script.
+- [x] Implement video stream ingestion (Webcam/File).
+- [x] Create logic for "Threat Persistence" (e.g., only alert if weapon seen for 5 consecutive frames to avoid glitches).
 
-### **Phase 3: User Interface (Streamlit)** (Week 3)
-- [ ] Build Dashboard Layout (Video Feed Left, Logs Right).
-- [ ] Add Sidebar Controls (Confidence Slider, Model Selector).
-- [ ] Implement "Red Alert" visual state.
-- [ ] Build "Incident Log" dataframe that updates live.
+### **Phase 3: User Interface (Streamlit)** (Week 3) ✅
+- [x] Build Dashboard Layout (Video Feed Left, Logs Right).
+- [x] Add Sidebar Controls (Confidence Slider, Model Selector).
+- [x] Implement "Red Alert" visual state.
+- [x] Build "Incident Log" dataframe that updates live.
 
 ### **Phase 4: Testing & Documentation** (Week 4)
 - [ ] **Stress Test:** Test with low-light footage and blurry motion.

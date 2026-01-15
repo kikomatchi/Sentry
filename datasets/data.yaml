@@ -1,0 +1,14 @@
+names:
+- gun
+- knife
+- person_with_mask
+nc: 3
+roboflow:
+  license: CC BY 4.0
+  project: weapon-detection-pgqnr
+  url: https://universe.roboflow.com/weapon-rcjrw/weapon-detection-pgqnr/dataset/8
+  version: 8
+  workspace: weapon-rcjrw
+test: /content/dataset/test/images
+train: /content/dataset/train/images
+val: /content/dataset/valid/images
