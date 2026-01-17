@@ -6,7 +6,6 @@ Run with: streamlit run src/app.py
 """
 
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -283,7 +282,7 @@ def render_incident_log():
 
     if st.session_state.incident_log:
         df = pd.DataFrame(st.session_state.incident_log[-50:][::-1])  # Last 50, newest first
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
     else:
         st.info("No detections recorded yet.")
 
@@ -324,7 +323,7 @@ def image_upload_mode(model: YOLO, conf_threshold: float):
             with col1:
                 # Convert BGR to RGB for display
                 display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                st.image(display_frame, caption=f"Detection Results ({len(detections)} objects)", use_container_width=True)
+                st.image(display_frame, caption=f"Detection Results ({len(detections)} objects)", width="stretch")
 
             with col2:
                 st.subheader("Detection Results")
@@ -344,86 +343,57 @@ def image_upload_mode(model: YOLO, conf_threshold: float):
 
 
 def webcam_mode(model: YOLO, conf_threshold: float):
-    """Handle webcam streaming mode."""
-    st.subheader("🎥 Webcam Detection")
+    """Handle webcam mode using browser camera input."""
+    st.subheader("📸 Camera Capture Detection")
 
-    col1, col2 = st.columns([3, 1])
+    st.info("📷 Use your device's camera to capture images for analysis. Click the camera button below to take a photo.")
 
-    with col2:
-        start_btn = st.button("▶️ Start Webcam", use_container_width=True, disabled=st.session_state.webcam_running)
-        stop_btn = st.button("⏹️ Stop Webcam", use_container_width=True, disabled=not st.session_state.webcam_running)
+    # Use st.camera_input for browser-based camera capture
+    camera_photo = st.camera_input("Take a picture for threat detection")
 
-        if start_btn:
-            st.session_state.webcam_running = True
-            st.rerun()
+    if camera_photo is not None:
+        # Read image from camera input
+        file_bytes = np.asarray(bytearray(camera_photo.read()), dtype=np.uint8)
+        frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-        if stop_btn:
-            st.session_state.webcam_running = False
-            st.rerun()
+        if frame is not None:
+            st.session_state.total_frames += 1
 
-        st.divider()
-        st.subheader("Live Stats")
-        fps_placeholder = st.empty()
-        detections_placeholder = st.empty()
-        alert_placeholder = st.empty()
+            # Process frame
+            processed_frame, detections, alert = process_frame_streamlit(
+                frame, model, conf_threshold
+            )
 
-    with col1:
-        frame_placeholder = st.empty()
+            # Update session state
+            st.session_state.alert_active = alert
 
-        if st.session_state.webcam_running:
-            cap = cv2.VideoCapture(0)
+            # Add to incident log
+            if detections:
+                add_to_incident_log(detections, st.session_state.total_frames)
 
-            if not cap.isOpened():
-                st.error("❌ Failed to open webcam. Please check your camera connection.")
-                st.session_state.webcam_running = False
-                return
+            # Display results
+            col1, col2 = st.columns([2, 1])
 
-            prev_time = time.time()
+            with col1:
+                # Convert BGR to RGB for display
+                display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                st.image(display_frame, caption=f"Detection Results ({len(detections)} objects)", width="stretch")
 
-            try:
-                while st.session_state.webcam_running:
-                    ret, frame = cap.read()
+            with col2:
+                st.subheader("Detection Results")
+                if detections:
+                    for det in detections:
+                        color = "🔴" if det['class'] in ['gun', 'knife'] else "🔵"
+                        st.write(f"{color} **{det['class']}**: {det['confidence']:.2%}")
+                else:
+                    st.info("No objects detected")
 
-                    if not ret:
-                        st.warning("⚠️ Failed to read frame from webcam")
-                        break
-
-                    st.session_state.total_frames += 1
-
-                    # Process frame
-                    processed_frame, detections, alert = process_frame_streamlit(
-                        frame, model, conf_threshold
-                    )
-
-                    # Update session state
-                    st.session_state.alert_active = alert
-
-                    # Add to incident log
-                    if detections:
-                        add_to_incident_log(detections, st.session_state.total_frames)
-
-                    # Calculate FPS
-                    curr_time = time.time()
-                    fps = 1.0 / (curr_time - prev_time) if curr_time != prev_time else 0
-                    prev_time = curr_time
-
-                    # Display frame
-                    display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                    frame_placeholder.image(display_frame, channels="RGB", use_container_width=True)
-
-                    # Update live stats
-                    fps_placeholder.metric("FPS", f"{fps:.1f}")
-                    detections_placeholder.metric("Detections", len(detections))
-
-                    if alert:
-                        alert_placeholder.error("⚠️ THREAT!")
-                    else:
-                        alert_placeholder.success("✅ Clear")
-
-            finally:
-                cap.release()
-        else:
-            st.info("👆 Click 'Start Webcam' to begin detection")
+                # Alert status
+                st.divider()
+                if alert:
+                    st.error("⚠️ **THREAT ALERT ACTIVE**")
+                else:
+                    st.success("✅ No active threats")
 
 
 def main():
