@@ -9,22 +9,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import av
 import cv2
 import numpy as np
 import pandas as pd
 import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
 from ultralytics import YOLO
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
 from threat_monitor import ThreatMonitor
-from utils import (
-    draw_detection_box,
-    draw_alert_overlay,
-    get_class_color,
-    save_screenshot
-)
+from utils import draw_detection_box, draw_alert_overlay
 
 # Page configuration
 st.set_page_config(
@@ -93,6 +90,44 @@ def load_model(model_path: str) -> YOLO:
     return YOLO(model_path)
 
 
+class VideoProcessor(VideoProcessorBase):
+    """Video processor for WebRTC live detection."""
+
+    def __init__(self):
+        self.model = None
+        self.conf_threshold = 0.25
+        self.result_queue = []
+
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        """Process each video frame."""
+        img = frame.to_ndarray(format="bgr24")
+
+        if self.model is not None:
+            # Run inference
+            results = self.model.predict(img, conf=self.conf_threshold, verbose=False)[0]
+            boxes = results.boxes
+
+            if boxes is not None and len(boxes) > 0:
+                for box in boxes:
+                    xyxy = box.xyxy[0].cpu().numpy().astype(int)
+                    conf = float(box.conf[0])
+                    cls_id = int(box.cls[0])
+                    cls_name = self.model.names[cls_id]
+
+                    # Draw bounding box
+                    x1, y1, x2, y2 = xyxy
+                    color = (0, 0, 255) if cls_name in ['gun', 'knife'] else (255, 165, 0)
+                    cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+
+                    # Draw label
+                    label = f"{cls_name}: {conf:.2f}"
+                    label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                    cv2.rectangle(img, (x1, y1 - label_size[1] - 10), (x1 + label_size[0], y1), color, -1)
+                    cv2.putText(img, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+
 def init_session_state():
     """Initialize session state variables."""
     if 'threat_monitor' not in st.session_state:
@@ -103,8 +138,6 @@ def init_session_state():
         st.session_state.detection_stats = {'gun': 0, 'knife': 0, 'person_with_mask': 0}
     if 'total_frames' not in st.session_state:
         st.session_state.total_frames = 0
-    if 'webcam_running' not in st.session_state:
-        st.session_state.webcam_running = False
     if 'alert_active' not in st.session_state:
         st.session_state.alert_active = False
 
@@ -343,57 +376,96 @@ def image_upload_mode(model: YOLO, conf_threshold: float):
 
 
 def webcam_mode(model: YOLO, conf_threshold: float):
-    """Handle webcam mode using browser camera input."""
-    st.subheader("📸 Camera Capture Detection")
+    """Handle webcam mode with both snapshot and live video options."""
+    st.subheader("🎥 Camera Detection")
 
-    st.info("📷 Use your device's camera to capture images for analysis. Click the camera button below to take a photo.")
+    # Sub-mode selector
+    camera_mode = st.radio(
+        "Camera Mode",
+        ["📸 Snapshot", "🔴 Live Video"],
+        horizontal=True,
+        help="Snapshot: Take photos for analysis. Live Video: Real-time detection stream."
+    )
 
-    # Use st.camera_input for browser-based camera capture
-    camera_photo = st.camera_input("Take a picture for threat detection")
+    if camera_mode == "📸 Snapshot":
+        # Snapshot mode using st.camera_input
+        st.info("📷 Click the camera button to capture a photo for analysis.")
 
-    if camera_photo is not None:
-        # Read image from camera input
-        file_bytes = np.asarray(bytearray(camera_photo.read()), dtype=np.uint8)
-        frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        camera_photo = st.camera_input("Take a picture for threat detection")
 
-        if frame is not None:
-            st.session_state.total_frames += 1
+        if camera_photo is not None:
+            # Read image from camera input
+            file_bytes = np.asarray(bytearray(camera_photo.read()), dtype=np.uint8)
+            frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-            # Process frame
-            processed_frame, detections, alert = process_frame_streamlit(
-                frame, model, conf_threshold
-            )
+            if frame is not None:
+                st.session_state.total_frames += 1
 
-            # Update session state
-            st.session_state.alert_active = alert
+                # Process frame
+                processed_frame, detections, alert = process_frame_streamlit(
+                    frame, model, conf_threshold
+                )
 
-            # Add to incident log
-            if detections:
-                add_to_incident_log(detections, st.session_state.total_frames)
+                # Update session state
+                st.session_state.alert_active = alert
 
-            # Display results
-            col1, col2 = st.columns([2, 1])
-
-            with col1:
-                # Convert BGR to RGB for display
-                display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                st.image(display_frame, caption=f"Detection Results ({len(detections)} objects)", width="stretch")
-
-            with col2:
-                st.subheader("Detection Results")
+                # Add to incident log
                 if detections:
-                    for det in detections:
-                        color = "🔴" if det['class'] in ['gun', 'knife'] else "🔵"
-                        st.write(f"{color} **{det['class']}**: {det['confidence']:.2%}")
-                else:
-                    st.info("No objects detected")
+                    add_to_incident_log(detections, st.session_state.total_frames)
 
-                # Alert status
-                st.divider()
-                if alert:
-                    st.error("⚠️ **THREAT ALERT ACTIVE**")
-                else:
-                    st.success("✅ No active threats")
+                # Display results
+                col1, col2 = st.columns([2, 1])
+
+                with col1:
+                    # Convert BGR to RGB for display
+                    display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                    st.image(display_frame, caption=f"Detection Results ({len(detections)} objects)", width="stretch")
+
+                with col2:
+                    st.subheader("Detection Results")
+                    if detections:
+                        for det in detections:
+                            color = "🔴" if det['class'] in ['gun', 'knife'] else "🔵"
+                            st.write(f"{color} **{det['class']}**: {det['confidence']:.2%}")
+                    else:
+                        st.info("No objects detected")
+
+                    # Alert status
+                    st.divider()
+                    if alert:
+                        st.error("⚠️ **THREAT ALERT ACTIVE**")
+                    else:
+                        st.success("✅ No active threats")
+
+    else:
+        # Live video mode using WebRTC
+        st.info("🔴 Live video detection. Click START to begin streaming from your camera.")
+
+        # RTC Configuration for STUN servers (needed for WebRTC)
+        rtc_configuration = {
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+        }
+
+        # Create WebRTC streamer
+        webrtc_ctx = webrtc_streamer(
+            key="weapon-detection",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration=rtc_configuration,
+            video_processor_factory=VideoProcessor,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=True,
+        )
+
+        # Pass model and settings to the video processor
+        if webrtc_ctx.video_processor:
+            webrtc_ctx.video_processor.model = model
+            webrtc_ctx.video_processor.conf_threshold = conf_threshold
+
+        # Display status
+        if webrtc_ctx.state.playing:
+            st.success("🔴 Live detection active")
+        else:
+            st.warning("⏸️ Click START above to begin live detection")
 
 
 def main():
